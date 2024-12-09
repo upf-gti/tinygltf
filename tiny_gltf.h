@@ -6428,7 +6428,7 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
                       this->LoadImageData, load_image_user_data)) {
         return false;
       }
-
+      bool ret = false; 
       if (image.bufferView != -1) {
         // Load image from the buffer view.
         if (size_t(image.bufferView) >= model->bufferViews.size()) {
@@ -6460,16 +6460,17 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
           }
           return false;
         }
-        bool ret = LoadImageData(
+        ret = LoadImageData(
             &image, idx, err, warn, image.width, image.height,
             &buffer.data[bufferView.byteOffset],
             static_cast<int>(bufferView.byteLength), load_image_user_data);
-        if (!ret) {
-          return false;
-        }
       }
-
-      model->images.emplace_back(std::move(image));
+      if (ret) {
+        if (idx >= model->images.size()) {
+          model->images.resize(idx + 1);
+        }
+        model->images[idx] = std::move(image);
+      }
       ++idx;
       return true;
     });
