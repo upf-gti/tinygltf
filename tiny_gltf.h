@@ -6398,7 +6398,32 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
     }
   }
 
-  // 11. Parse Image
+  // 11. Parse Texture
+  {
+      bool success = ForEachInArray(v, "textures", [&](const detail::json& o) {
+          if (!detail::IsObject(o)) {
+              if (err) {
+                  (*err) += "`textures' does not contain an JSON object.";
+              }
+              return false;
+          }
+          Texture texture;
+          if (!ParseTexture(&texture, err, o,
+              store_original_json_for_extras_and_extensions_,
+              base_dir)) {
+              return false;
+          }
+
+          model->textures.emplace_back(std::move(texture));
+          return true;
+          });
+
+      if (!success) {
+          return false;
+      }
+  }
+
+  // 12. Parse Image
   void *load_image_user_data{nullptr};
 
   LoadImageDataOption load_image_option;
@@ -6413,8 +6438,59 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
   }
 
   {
+    auto IsImageUsed = [&](int idx) {
+      int scene_idx = model->defaultScene >= 0 ? model->defaultScene : 0;
+      for (int node_idx : model->scenes[scene_idx].nodes) {
+        const Node& node = model->nodes[node_idx];
+        if (node.mesh == -1) {
+          continue;
+        }
+        const Mesh& mesh = model->meshes[node.mesh];
+        for (uint32_t primitive_idx = 0u; primitive_idx < mesh.primitives.size(); ++primitive_idx) {
+          const Primitive& primitive = mesh.primitives[primitive_idx];
+          if (primitive.material == -1) {
+            continue;
+          }
+          const Material& material = model->materials[primitive.material];
+          if (material.normalTexture.index >= 0) {
+            if (model->textures[material.normalTexture.index].source == idx) {
+              return true;
+            }
+          }
+          if (material.occlusionTexture.index >= 0) {
+            if (model->textures[material.occlusionTexture.index].source == idx) {
+              return true;
+            }
+          }
+          if (material.emissiveTexture.index >= 0) {
+            if (model->textures[material.emissiveTexture.index].source == idx) {
+              return true;
+            }
+          }
+          const PbrMetallicRoughness& pbr = material.pbrMetallicRoughness;
+          if (pbr.baseColorTexture.index >= 0) {
+            if (model->textures[pbr.baseColorTexture.index].source == idx) {
+              return true;
+            }
+          }
+          if (pbr.metallicRoughnessTexture.index >= 0) {
+            if (model->textures[pbr.metallicRoughnessTexture.index].source == idx) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    };
+
     int idx = 0;
     bool success = ForEachInArray(v, "images", [&](const detail::json &o) {
+
+      if (!IsImageUsed(idx)) {
+        ++idx;
+        return true;
+      }
+
       if (!detail::IsObject(o)) {
         if (err) {
           (*err) += "image[" + std::to_string(idx) + "] is not a JSON object.";
@@ -6472,31 +6548,6 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
         model->images[idx] = std::move(image);
       }
       ++idx;
-      return true;
-    });
-
-    if (!success) {
-      return false;
-    }
-  }
-
-  // 12. Parse Texture
-  {
-    bool success = ForEachInArray(v, "textures", [&](const detail::json &o) {
-      if (!detail::IsObject(o)) {
-        if (err) {
-          (*err) += "`textures' does not contain an JSON object.";
-        }
-        return false;
-      }
-      Texture texture;
-      if (!ParseTexture(&texture, err, o,
-                        store_original_json_for_extras_and_extensions_,
-                        base_dir)) {
-        return false;
-      }
-
-      model->textures.emplace_back(std::move(texture));
       return true;
     });
 
