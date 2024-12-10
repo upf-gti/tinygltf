@@ -6438,13 +6438,8 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
   }
 
   {
-    auto IsImageUsed = [&](int idx) {
-      int scene_idx = model->defaultScene >= 0 ? model->defaultScene : 0;
-      for (int node_idx : model->scenes[scene_idx].nodes) {
-        const Node& node = model->nodes[node_idx];
-        if (node.mesh == -1) {
-          continue;
-        }
+    std::function<bool(const Node&,int)> IsNodeUsingImage = [&](const Node& node, int idx) {
+      if (node.mesh >= 0) {
         const Mesh& mesh = model->meshes[node.mesh];
         for (uint32_t primitive_idx = 0u; primitive_idx < mesh.primitives.size(); ++primitive_idx) {
           const Primitive& primitive = mesh.primitives[primitive_idx];
@@ -6480,9 +6475,26 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
           }
         }
       }
+      for (int child_idx : node.children) {
+        const Node& child_node = model->nodes[child_idx];
+        bool val = IsNodeUsingImage(child_node, idx);
+        if (val) {
+          return true;
+        }
+      }
       return false;
     };
-
+    std::function<bool(int)> IsImageUsed = [&](int idx) {
+      int scene_idx = model->defaultScene >= 0 ? model->defaultScene : 0;
+      for (int node_idx : model->scenes[scene_idx].nodes) {
+        const Node& node = model->nodes[node_idx];
+        bool val = IsNodeUsingImage(node, idx);
+        if (val) {
+          return true;
+        }
+      }
+      return false;
+    };
     int idx = 0;
     bool success = ForEachInArray(v, "images", [&](const detail::json &o) {
 
@@ -6504,7 +6516,6 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
                       this->LoadImageData, load_image_user_data)) {
         return false;
       }
-      bool ret = false; 
       if (image.bufferView != -1) {
         // Load image from the buffer view.
         if (size_t(image.bufferView) >= model->bufferViews.size()) {
@@ -6536,17 +6547,19 @@ bool TinyGLTF::LoadFromString(Model *model, std::string *err, std::string *warn,
           }
           return false;
         }
-        ret = LoadImageData(
+        bool ret = LoadImageData(
             &image, idx, err, warn, image.width, image.height,
             &buffer.data[bufferView.byteOffset],
             static_cast<int>(bufferView.byteLength), load_image_user_data);
-      }
-      if (ret) {
-        if (idx >= model->images.size()) {
-          model->images.resize(idx + 1);
+        if (!ret) {
+            ++idx;
+            return true;
         }
-        model->images[idx] = std::move(image);
       }
+      if (idx >= model->images.size()) {
+          model->images.resize(idx + 1);
+      }
+      model->images[idx] = std::move(image);
       ++idx;
       return true;
     });
